@@ -1,0 +1,19 @@
+body {
+    margin: 0;
+    overflow: hidden; /* Hide scrollbars */
+    background-color: #121212; /* Dark background */
+    display: flex; /* Use flexbox for potential future centering/alignment */
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+
+#ball {
+    width: 50px;
+    height: 50px;
+    background-color: #BB86FC; /* Initial ball color (from a dark theme palette) */
+    border-radius: 50%;
+    position: absolute; /* Position relative to the body */
+    /* Initial position will be set by JavaScript */
+    transition: background-color 0.5s ease; /* Smooth color transition */
+} 
