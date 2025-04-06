@@ -67,23 +67,28 @@ Build "PageHub", a service allowing users to create, modify, and manage version-
 *   **Security:** Protecting user data, site content, and API keys.
 *   **Learning Curve:** Adapting to the Gen 2 code-first/CDK approach.
 
-## Overall Progress (Milestone 1 - Gen 2)
+## Overall Progress (Milestone 1 - Link Access)
 
-*(Focusing on Milestone 1: Enable 2 friends/family to manage sites via invite)*
+*(Focusing on Milestone 1: Enable 2 friends/family to manage sites via temporary link access)*
 
 - [x] Setup Project Structure & Initial Files (`.cursorrules`, `tasks/`)
 - [x] Choose Frontend Framework (React)
 - [x] Initialize Amplify Gen 2 Project (`npm create amplify@latest` in `app/` dir)
-- [ ] Define Cognito Authentication (`defineAuth` in `app/amplify/auth/resource.ts`, incl. social)
-- [ ] Define DynamoDB Tables & API (`defineData` in `app/amplify/data/resource.ts` for Site Metadata, User-Site Links, Versioning)
-- [ ] Implement Core Site Management Lambdas (Gen 2/CDK in `app/amplify/functions/...`: `createSite`, `getSite`, basic S3 interaction via SDK)
-- [ ] Implement LLM Integration Lambda (Gen 2/CDK in `app/amplify/functions/...`: Anthropic API call)
-- [ ] Implement Basic Frontend UI (In `app/src/`, Auth via Amplify UI, Prompt Input using `generateClient`, Site Preview)
-- [ ] Implement Basic Versioning Logic (S3 versions via SDK in Lambdas, DynamoDB metadata via `generateClient`)
-- [ ] Implement Basic S3 Hosting for User Sites (Bucket creation via SDK in `createSite` Lambda)
-- [ ] Add Basic Cost Display/Estimation Logic (Display estimated cost of LLM calls/S3 storage - likely frontend calculation)
+- [-] Define Cognito Authentication (`defineAuth` ...) -> Deferred for M1
+- [x] Define Initial Data Schema (`defineData` in `app/amplify/data/resource.ts` for Site, SiteVersion, AccessToken; Auth set to IAM placeholder)
+- [-] Implement Core Site Management Lambdas (`createSite`, ...) -> Admin task for M1
+- [ ] Implement LLM Integration Lambda (Gen 2/CDK in `app/amplify/functions/...`: Anthropic API call - needs token auth logic)
+- [ ] Implement Token Generation Lambda (Admin only)
+- [ ] Implement AppSync Lambda Authorizer (`tokenAuthorizerFunction`)
+- [ ] Implement Basic Frontend UI (In `app/src/`, receives token/siteId from URL, uses token for API calls, Prompt Input, Site Preview)
+- [ ] Implement Basic Versioning Logic (S3 versions via SDK in Lambdas, DynamoDB metadata via AppSync)
+- [ ] Implement Basic S3 Hosting for User Sites (Bucket creation via Admin process/script)
+- [ ] Add Basic Cost Display/Estimation Logic (Display estimated cost of LLM calls/S3 storage)
 
-*(Future Milestones)*
+*(Future Milestones - Post M1)*
+- [ ] Implement Cognito Authentication (User accounts, social login)
+- [ ] Implement User-based Site Creation (`createSite` mutation)
+- [ ] Implement User-Site Linking (Invite system using Cognito)
 - [ ] Implement Frontend UI for Version History, Rollback, Branching (using `generateClient`)
 - [ ] Implement S3 Hosting for Subdomains (`*.pagehub.io`) via Route 53/CloudFront
 - [ ] Implement Custom Domain Instructions/Integration (Route 53)

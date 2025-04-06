@@ -1,29 +1,25 @@
 import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
-// Import the function definition to use as a handler
-// @ts-ignore - Assume file exists, may be temporary cache issue
-import { createSite as createSiteFunction } from './functions/create-site/resource';
+// We will import the Lambda authorizer function later
+// import { tokenAuthorizerFunction } from './functions/token-authorizer/resource';
 
 /*
-Defines the GraphQL schema for the PageHub application.
-Includes models for Sites, Site Versions, and links between Users and Sites.
-Authorization rules are configured for Cognito User Pools and IAM (for backend functions).
+Defines the GraphQL schema for the PageHub application (Milestone 1 - Link Access).
+Includes models for Sites, Site Versions, and Access Tokens.
+Authorization is handled by a Lambda authorizer.
 */
 const schema = a.schema({
   Site: a
     .model({
       name: a.string().required(),
-      owner: a.string().required(), // Cognito User Pool unique identifier (sub)
+      // owner field removed for link-based access
       creationDate: a.datetime().required(),
       currentVersionId: a.id(), // Link to the currently published version
       versions: a.hasMany('SiteVersion', 'siteId'),
-      userLinks: a.hasMany('UserSiteLink', 'siteId'),
+      // userLinks relationship removed
       // TODO: Add fields for domain/subdomain later
     })
-    .authorization((allow) => [
-      allow.ownerDefinedIn('owner').to(['read', 'update', 'delete']),
-      allow.authenticated().to(['create', 'read']), // Allow read for any authenticated user for now
-      // Mutations like update/delete are restricted to the owner by the rule above.
-    ]),
+    // No specific model-level authorization rules; handled by Lambda authorizer
+    ,
 
   SiteVersion: a
     .model({
@@ -35,38 +31,29 @@ const schema = a.schema({
       siteId: a.id().required(),
       site: a.belongsTo('Site', 'siteId'),
     })
-    .authorization((allow) => [
-      allow.authenticated().to(['read']), // Allow any authenticated user to read version metadata
-      // Create/Update/Delete operations are restricted to backend functions via IAM
-    ]),
+    // No specific model-level authorization rules; handled by Lambda authorizer
+    ,
 
-  UserSiteLink: a
+  // UserSiteLink model removed
+
+  // New model to store temporary access tokens
+  AccessToken: a
     .model({
-      userId: a.string().required(), // Cognito User Pool unique identifier (sub)
-      role: a.enum(['ADMIN', 'EDITOR']), // Access level role
+      // Use a non-guessable token ID (e.g., UUID or secure random string)
+      token: a.string().required(),
       siteId: a.id().required(),
-      site: a.belongsTo('Site', 'siteId'),
+      // TTL in seconds (e.g., 48 hours = 172800 seconds)
+      expiresAt: a.timestamp().required(),
     })
-    .identifier(['userId', 'siteId']) // Composite key
-    .authorization((allow) => [
-      allow.ownerDefinedIn('userId').to(['read', 'delete']),
-      // Create/Update operations are restricted to backend functions via IAM (e.g., invite logic)
-      // TODO: Allow Site owner to read/delete links?
-    ]),
+    .identifier(['token'])
+    .secondaryIndexes((index) => [
+      index('siteId'), // Allow querying tokens by siteId if needed
+    ])
+    // TTL configuration removed - revisit later
+    // Authorization removed - rely on IAM permissions for backend functions
+    ,
 
-  // Define the custom mutation
-  createSite: a
-    .mutation()
-    // Input arguments for the mutation
-    .arguments({
-      name: a.string().required(),
-    })
-    // Return type - should match the Site model
-    .returns(a.ref('Site'))
-    // Link to the Lambda function handler
-    .handler(a.handler.function(createSiteFunction))
-    // Authorize only authenticated users to call this mutation
-    .authorization((allow) => [allow.authenticated()]),
+  // createSite mutation removed - site creation handled by admin process
 
 }); // End of schema definition
 
@@ -75,9 +62,8 @@ export type Schema = ClientSchema<typeof schema>;
 export const data = defineData({
   schema,
   authorizationModes: {
-    // Default mode for client-side operations (checking owner, authenticated status)
-    defaultAuthorizationMode: 'userPool',
-    // We will grant IAM access to backend functions separately when defining them.
+    // Set IAM as default for now. We will configure a Lambda authorizer later.
+    defaultAuthorizationMode: 'iam',
   },
 });
 

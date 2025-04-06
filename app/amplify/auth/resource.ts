@@ -4,7 +4,9 @@ import { defineAuth, secret } from '@aws-amplify/backend';
  * Define and configure your auth resource
  * @see https://docs.amplify.aws/gen2/build-a-backend/auth
  */
-export const auth = defineAuth({
+
+/* Milestone 1: Using temporary link-based access, Cognito not required initially.
+export const auth_COGNITO_CONFIG_COMMENTED_OUT = defineAuth({
   loginWith: {
     email: true,
     externalProviders: {
@@ -18,18 +20,24 @@ export const auth = defineAuth({
         clientSecret: secret('FACEBOOK_APP_SECRET'), // Facebook uses App Secret
         scopes: ['public_profile', 'email'], // Standard scopes
       },
-      // Define placeholder callback and logout URLs.
-      // You will need to update these in your Google/Facebook app configuration
-      // once Amplify deploys and provides the correct URLs, or use environment-specific URLs.
       callbackUrls: [
-        'http://localhost:3000/signin', // Common local dev URL path
-        'https://YOUR_PROD_DOMAIN/signin' // Placeholder for production
+        'http://localhost:3000/signin',
+        'https://YOUR_PROD_DOMAIN/signin'
       ],
       logoutUrls: [
         'http://localhost:3000/signout',
-        'https://YOUR_PROD_DOMAIN/signout' // Placeholder for production
+        'https://YOUR_PROD_DOMAIN/signout'
       ],
     }
   },
-  // We will add user attributes and Cognito triggers for the invite link logic later.
+});
+*/
+
+// Define a minimal auth resource to satisfy Amplify requirements,
+// even though Milestone 1 uses link-based access, not Cognito login.
+export const auth = defineAuth({
+  loginWith: {
+    email: true, // Keep a minimal login mechanism defined
+  },
+  // Add other required minimal properties if defineAuth({}) fails
 });
