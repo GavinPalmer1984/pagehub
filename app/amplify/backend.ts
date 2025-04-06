@@ -6,6 +6,7 @@ import { Stack } from 'aws-cdk-lib'; // Import Stack to get region
 import { data } from './data/resource';
 import { createSite as createSiteFunction } from './functions/create-site/resource';
 import { llmHandlerFunction } from './functions/llm-handler/resource';
+import { tokenGeneratorFunction } from './functions/token-generator/resource'; // Import token generator
 
 /**
  * @see https://docs.amplify.aws/gen2/build-a-backend/
@@ -15,6 +16,7 @@ const backend = defineBackend({
   data,
   createSiteFunction,
   llmHandlerFunction,
+  tokenGeneratorFunction, // Add token generator
 });
 
 // Permissions for createSiteFunction removed
@@ -73,6 +75,30 @@ backend.createSiteFunction.resources.lambda.addToRolePolicy(
       's3:PutObjectAcl' // May need for initial public read?
     ],
     resources: ['arn:aws:s3:::pagehub-site-*', 'arn:aws:s3:::pagehub-site-*/*'],
+})
+);
+
+// --- tokenGeneratorFunction Configuration ---
+const adminApiKeySecretArn = process.env.ADMIN_API_KEY_SECRET_ARN || 'arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:pagehub/adminApiKey-??????'; // Placeholder ARN - REPLACE!
+const appsyncApiArn = backend.data.resources.graphqlApi.arn;
+
+backend.tokenGeneratorFunction.addEnvironment('ADMIN_API_KEY_SECRET_ARN', adminApiKeySecretArn);
+backend.tokenGeneratorFunction.addEnvironment('APPSYNC_API_ID', apiId);
+backend.tokenGeneratorFunction.addEnvironment('AWS_REGION_FOR_APPSYNC', region);
+
+backend.tokenGeneratorFunction.resources.lambda.addToRolePolicy(
+  new iam.PolicyStatement({
+    effect: iam.Effect.ALLOW,
+    actions: ['secretsmanager:GetSecretValue'],
+    resources: [adminApiKeySecretArn],
+})
+);
+backend.tokenGeneratorFunction.resources.lambda.addToRolePolicy(
+  new iam.PolicyStatement({
+    effect: iam.Effect.ALLOW,
+    actions: ['appsync:GraphQL'],
+    // Grant permission specifically for the createAccessToken mutation
+    resources: [appsyncApiArn + '/types/Mutation/fields/createAccessToken'],
 })
 );
 
