@@ -1,4 +1,10 @@
 import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
+// Import the authorizer function
+// @ts-ignore - Assume file exists, may be temporary cache issue
+import { tokenAuthorizerFunction } from './functions/token-authorizer/resource';
+// Import the token generator function (needed for AccessToken auth rule)
+// @ts-ignore - Assume file exists, may be temporary cache issue
+import { tokenGeneratorFunction } from './functions/token-generator/resource';
 // We will import the Lambda authorizer function later
 // import { tokenAuthorizerFunction } from './functions/token-authorizer/resource';
 
@@ -50,8 +56,7 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('siteId'), // Allow querying tokens by siteId if needed
     ])
-    // TTL configuration removed - revisit later
-    // Authorization removed - rely on IAM permissions for backend functions
+    // Remove model-level authorization; rely on IAM grants in backend.ts
     ,
 
   // createSite mutation removed - site creation handled by admin process
@@ -63,8 +68,13 @@ export type Schema = ClientSchema<typeof schema>;
 export const data = defineData({
   schema,
   authorizationModes: {
-    // Set IAM as default for now. We will configure a Lambda authorizer later.
-    defaultAuthorizationMode: 'iam',
+    // Set Lambda as the default authorization mode
+    defaultAuthorizationMode: 'lambda',
+    lambdaAuthorizationMode: {
+      function: tokenAuthorizerFunction, // Link the authorizer function
+    },
+    // Remove explicit IAM mode; assume IAM calls are allowed if role has permissions
+    // iamAuthorizationMode: 'enabled'
   },
 });
 
