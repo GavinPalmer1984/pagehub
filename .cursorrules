@@ -6,6 +6,8 @@ Build "PageHub", a service allowing users to create, modify, and manage version-
 
 ## Technical Plan (Using AWS Amplify Gen 2)
 
+*(Note: The React frontend and Amplify backend code reside within the `app/` subdirectory.)*
+
 ### Core Technologies
 
 - **Frontend Framework:** React hosted on **AWS Amplify Hosting**.
@@ -71,12 +73,12 @@ Build "PageHub", a service allowing users to create, modify, and manage version-
 
 - [x] Setup Project Structure & Initial Files (`.cursorrules`, `tasks/`)
 - [x] Choose Frontend Framework (React)
-- [ ] Initialize Amplify Gen 2 Project (`npm create amplify@latest`)
-- [ ] Define Cognito Authentication (`defineAuth` in `amplify/auth/resource.ts`, incl. social)
-- [ ] Define DynamoDB Tables & API (`defineData` in `amplify/data/resource.ts` for Site Metadata, User-Site Links, Versioning)
-- [ ] Implement Core Site Management Lambdas (Gen 2/CDK: `createSite`, `getSite`, basic S3 interaction via SDK)
-- [ ] Implement LLM Integration Lambda (Gen 2/CDK: Anthropic API call)
-- [ ] Implement Basic Frontend UI (Auth via Amplify UI, Prompt Input using `generateClient`, Site Preview)
+- [x] Initialize Amplify Gen 2 Project (`npm create amplify@latest` in `app/` dir)
+- [ ] Define Cognito Authentication (`defineAuth` in `app/amplify/auth/resource.ts`, incl. social)
+- [ ] Define DynamoDB Tables & API (`defineData` in `app/amplify/data/resource.ts` for Site Metadata, User-Site Links, Versioning)
+- [ ] Implement Core Site Management Lambdas (Gen 2/CDK in `app/amplify/functions/...`: `createSite`, `getSite`, basic S3 interaction via SDK)
+- [ ] Implement LLM Integration Lambda (Gen 2/CDK in `app/amplify/functions/...`: Anthropic API call)
+- [ ] Implement Basic Frontend UI (In `app/src/`, Auth via Amplify UI, Prompt Input using `generateClient`, Site Preview)
 - [ ] Implement Basic Versioning Logic (S3 versions via SDK in Lambdas, DynamoDB metadata via `generateClient`)
 - [ ] Implement Basic S3 Hosting for User Sites (Bucket creation via SDK in `createSite` Lambda)
 - [ ] Add Basic Cost Display/Estimation Logic (Display estimated cost of LLM calls/S3 storage - likely frontend calculation)
