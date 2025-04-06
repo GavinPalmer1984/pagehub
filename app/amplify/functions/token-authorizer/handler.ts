@@ -1,31 +1,13 @@
 import type { AppSyncAuthorizerEvent, AppSyncAuthorizerResult } from 'aws-lambda';
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
 
 // Environment variables - expected to be set
-const appsyncApiId = process.env.APPSYNC_API_ID;
-const appsyncRegion = process.env.AWS_REGION_FOR_APPSYNC;
-const awsAccountId = process.env.AWS_ACCOUNT_ID; // Needed for policy ARN
+const region = process.env.AWS_REGION || 'us-east-1';
+const accessTokenTableName = process.env.ACCESS_TOKEN_TABLE_NAME;
 
-// Placeholder for AppSync client call function (similar to token-generator)
-async function callAppSync(query: string, variables: any): Promise<any> {
-    console.warn('callAppSync function is a placeholder!');
-    console.log(`AppSync Call: Query=${query.substring(0,100)}..., Vars=${JSON.stringify(variables)}`);
-    // TODO: Implement actual AppSync call using fetch/SigV4 or client SDK
-    // Construct endpoint: `https://${appsyncApiId}.appsync-api.${appsyncRegion}.amazonaws.com/graphql`
-
-    // Simulate finding a token for now if token is 'valid-token'
-    if (variables.token === 'valid-token') {
-        return {
-            data: {
-                getAccessToken: {
-                    token: variables.token,
-                    siteId: 'mock-site-id',
-                    expiresAt: Math.floor(Date.now() / 1000) + 3600 // Expires in 1 hour
-                }
-            }
-        };
-    }
-    return { data: { getAccessToken: null } }; // Simulate token not found
-}
+const client = new DynamoDBClient({ region });
+const docClient = DynamoDBDocumentClient.from(client);
 
 export const handler = async (
     event: AppSyncAuthorizerEvent
@@ -39,31 +21,24 @@ export const handler = async (
         return { isAuthorized: false };
     }
 
-    if (!appsyncApiId || !appsyncRegion || !awsAccountId) {
-        console.error('Missing required environment variables for authorizer.');
-        // Fail closed - don't authorize if config is missing
-        return { isAuthorized: false };
+    if (!accessTokenTableName) {
+        console.error('Missing required environment variable: ACCESS_TOKEN_TABLE_NAME.');
+        return { isAuthorized: false }; // Fail closed
     }
 
-    const apiArn = `arn:aws:appsync:${appsyncRegion}:${awsAccountId}:apis/${appsyncApiId}`;
-
     try {
-        // Query the AccessToken table using the provided token
-        const query = /* GraphQL */ `
-            query GetAccessToken($token: String!) {
-                getAccessToken(token: $token) {
-                    token
-                    siteId
-                    expiresAt
-                }
+        // Get the token item from DynamoDB
+        const command = new GetCommand({
+            TableName: accessTokenTableName,
+            Key: {
+                token: authorizationToken // Assuming 'token' is the partition key
             }
-        `;
-        const variables = { token: authorizationToken };
-        const response = await callAppSync(query, variables);
-        const accessToken = response.data?.getAccessToken;
+        });
+        const response = await docClient.send(command);
+        const accessToken = response.Item;
 
         if (!accessToken) {
-            console.log(`Token not found: ${authorizationToken}`);
+            console.log(`Token not found in DynamoDB: ${authorizationToken}`);
             return { isAuthorized: false };
         }
 
@@ -71,24 +46,21 @@ export const handler = async (
         const nowSeconds = Math.floor(Date.now() / 1000);
         if (accessToken.expiresAt <= nowSeconds) {
             console.log(`Token expired: ${authorizationToken}`);
+            // TODO: Optionally delete expired token from DB?
             return { isAuthorized: false };
         }
 
         // Token is valid!
         console.log(`Token validated for siteId: ${accessToken.siteId}`);
 
-        // Return a simple authorized result
-        // We remove resolverContext for now to resolve linting issues
+        // Return authorized result
         return {
             isAuthorized: true,
-            // resolverContext: {
-            //     siteId: accessToken.siteId,
-            //     token: accessToken.token
-            // },
+            // Remove resolverContext for now
         };
 
     } catch (error) {
-        console.error('Error during token validation:', error);
+        console.error('Error during token validation (DynamoDB):', error);
         return { isAuthorized: false };
     }
 }; 

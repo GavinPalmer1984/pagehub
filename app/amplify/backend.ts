@@ -107,19 +107,28 @@ backend.tokenGeneratorFunction.resources.lambda.addToRolePolicy(
 );
 
 // --- tokenAuthorizerFunction Configuration ---
-backend.tokenAuthorizerFunction.addEnvironment('APPSYNC_API_ID', apiId);
-backend.tokenAuthorizerFunction.addEnvironment('AWS_REGION_FOR_APPSYNC', region);
-backend.tokenAuthorizerFunction.addEnvironment('AWS_ACCOUNT_ID', accountId);
+// Remove AppSync env vars, add table name env var
+// backend.tokenAuthorizerFunction.addEnvironment('APPSYNC_API_ID', apiId);
+// backend.tokenAuthorizerFunction.addEnvironment('AWS_REGION_FOR_APPSYNC', region);
+// backend.tokenAuthorizerFunction.addEnvironment('AWS_ACCOUNT_ID', accountId);
+backend.tokenAuthorizerFunction.addEnvironment(
+    'ACCESS_TOKEN_TABLE_NAME',
+    // Construct the table name or get reference from `data` resource
+    // Option 1: Construct name (less robust if naming changes)
+    // `AccessToken-${apiId}-${Stack.of(backend.data).stackName}`
+    // Option 2: Get reference (better)
+    backend.data.resources.tables.AccessToken.tableName
+);
 
+// Grant permission to read from the AccessToken table
 backend.tokenAuthorizerFunction.resources.lambda.addToRolePolicy(
   new iam.PolicyStatement({
     effect: iam.Effect.ALLOW,
-    actions: ['appsync:GraphQL'],
-    // Grant permission specifically for the getAccessToken query
-    resources: [appsyncApiArn + '/types/Query/fields/getAccessToken'],
+    actions: ['dynamodb:GetItem'],
+    resources: [backend.data.resources.tables.AccessToken.tableArn],
 })
 );
 
-// --- llmHandlerFunction Permissions and Environment (Placeholder) ---
+// --- llmHandlerFunction Configuration (Placeholder) ---
 // TODO: Grant permissions for Anthropic API access (e.g., Secrets Manager)
 // TODO: Add environment variables (e.g., API Key Secret ARN)
