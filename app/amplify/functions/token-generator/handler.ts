@@ -1,120 +1,138 @@
-import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
-import { randomUUID } from 'crypto'; // Use built-in crypto for UUID
-
-// Input event for direct Lambda invocation
-interface TokenGeneratorEvent {
-  siteId: string;
-  apiKey: string; // Admin API Key
-}
-
-// Define the expected return type
-interface TokenGeneratorResult {
-  siteId: string;
-  token: string; // The generated access token
-  expiresAt: number; // Expiry timestamp (Unix seconds)
-}
+import type { AppSyncResolverEvent } from 'aws-lambda';
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
+import * as jwt from 'jsonwebtoken';
+import { randomUUID } from 'crypto'; // For generating a unique ID for the DB record
 
 // Environment variables
 const region = process.env.AWS_REGION || 'us-east-1';
-const adminApiKeySecretArn = process.env.ADMIN_API_KEY_SECRET_ARN;
-const appsyncApiId = process.env.APPSYNC_API_ID;
-const appsyncRegion = process.env.AWS_REGION_FOR_APPSYNC || region;
+const accessTokenTableName = process.env.ACCESS_TOKEN_TABLE_NAME;
+const adminApiKeySecretArn = process.env.ADMIN_API_KEY_SECRET_ARN; // Keep for admin check
+const jwtSecretArn = process.env.JWT_SECRET_ARN; // New: ARN for the JWT signing secret
+const jwtExpirySeconds = parseInt(process.env.JWT_EXPIRY_SECONDS || '172800', 10); // Default 48 hours
 
-const secretsManager = new SecretsManagerClient({ region });
+const ddbClient = new DynamoDBClient({ region });
+const docClient = DynamoDBDocumentClient.from(ddbClient);
+const secretsClient = new SecretsManagerClient({ region });
 
-// --- Reusable Admin API Key Validation --- (Copied from create-site handler)
-const validateAdminApiKey = async (providedApiKey: string): Promise<void> => {
-    if (!adminApiKeySecretArn) {
-        console.error('Admin API Key Secret ARN not configured.');
-        throw new Error('Configuration error [Admin API Key].');
+// Function to fetch secret value
+let cachedJwtSecret: string | null = null;
+async function getJwtSecret(): Promise<string> {
+    if (cachedJwtSecret) {
+        return cachedJwtSecret;
     }
-    if (!providedApiKey) {
-        throw new Error('Admin API Key not provided.');
+    if (!jwtSecretArn) {
+        throw new Error('JWT_SECRET_ARN environment variable is not set.');
     }
-    try {
-        const command = new GetSecretValueCommand({ SecretId: adminApiKeySecretArn });
-        const data = await secretsManager.send(command);
-        const storedApiKey = data.SecretString;
-        if (!storedApiKey || providedApiKey !== storedApiKey) {
-            console.warn('Invalid Admin API Key provided.');
-            throw new Error('Unauthorized');
-        }
-        console.log('Admin API Key validated.');
-    } catch (error) {
-        console.error('Error validating Admin API Key:', error);
-        throw new Error('Unauthorized');
+    const command = new GetSecretValueCommand({ SecretId: jwtSecretArn });
+    const data = await secretsClient.send(command);
+    if (data.SecretString) {
+        cachedJwtSecret = data.SecretString;
+        return cachedJwtSecret;
+    } else if (data.SecretBinary) {
+        // Handle binary secret if necessary, e.g., decode base64
+        cachedJwtSecret = Buffer.from(data.SecretBinary).toString('utf8');
+        return cachedJwtSecret;
     }
+    throw new Error('JWT Secret value not found.');
+}
+
+
+// Simplified Admin Check (replace with actual API key check later if needed)
+const validateAdminApiKey = async (apiKey: string | undefined): Promise<boolean> => {
+    // Placeholder: In a real scenario, fetch the key from Secrets Manager (using adminApiKeySecretArn)
+    // and compare securely. For now, just check if it exists.
+    // const command = new GetSecretValueCommand({ SecretId: adminApiKeySecretArn });
+    // const storedSecret = await secretsClient.send(command);
+    // return !!apiKey && apiKey === storedSecret.SecretString;
+    return !!apiKey; // Temporary: Just check if API key is provided
 };
-// --- End API Key Validation ---
+
+// Input type for the mutation (adjust based on your actual GraphQL schema if needed)
+interface CreateAccessTokenArgs {
+    siteId: string;
+    // Add any other args needed, like duration?
+}
 
 export const handler = async (
-  event: TokenGeneratorEvent
-): Promise<TokenGeneratorResult> => {
-  console.log(`Event: ${JSON.stringify(event)}`);
+    event: AppSyncResolverEvent<CreateAccessTokenArgs>
+): Promise<{ token: string; expiresAt: number } | null> => { // Return JWT token string
+    console.log(`Event: ${JSON.stringify(event)}`);
 
-  const { siteId, apiKey } = event;
+    // --- Admin Authorization ---
+    const adminApiKey = event.request.headers['x-api-key']; // Or however the key is passed
+    const isAdmin = await validateAdminApiKey(adminApiKey);
+    if (!isAdmin) {
+        console.error('Unauthorized: Missing or invalid admin API key.');
+        // Consider throwing an AppSync error or returning null/specific error object
+        throw new Error("Unauthorized");
+    }
 
-  // --- Authorization Check ---
-  await validateAdminApiKey(apiKey);
-  // --- End Authorization Check ---
+    // --- Input Validation ---
+    const { siteId } = event.arguments;
+    if (!siteId) {
+        console.error('Missing required argument: siteId');
+        throw new Error("Missing siteId");
+    }
+    if (!accessTokenTableName) {
+        console.error('Missing environment variable: ACCESS_TOKEN_TABLE_NAME');
+        throw new Error("Server configuration error: Missing table name.");
+    }
+     if (!jwtSecretArn) {
+        console.error('Missing environment variable: JWT_SECRET_ARN');
+        throw new Error("Server configuration error: Missing JWT secret ARN.");
+    }
 
-  if (!siteId) {
-    throw new Error('Missing required input: siteId');
-  }
-  if (!appsyncApiId) {
-    throw new Error('Missing configuration: AppSync API ID');
-  }
+    try {
+        // --- Generate Token Details ---
+        const tokenId = randomUUID(); // Unique ID for the DB record, not the token itself
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        const expiresAtSeconds = nowSeconds + jwtExpirySeconds;
 
-  // Generate token details
-  const token = randomUUID();
-  const validitySeconds = 48 * 60 * 60; // 48 hours
-  const expiresAt = Math.floor(Date.now() / 1000) + validitySeconds;
+        // --- Store Record in DynamoDB (optional but good for tracking) ---
+        const putCommand = new PutCommand({
+            TableName: accessTokenTableName,
+            Item: {
+                token: tokenId, // Store the unique ID, not the JWT
+                siteId: siteId,
+                createdAt: nowSeconds, // Add creation timestamp
+                expiresAt: expiresAtSeconds,
+            },
+            // Optional: ConditionExpression to prevent overwriting?
+        });
+        await docClient.send(putCommand);
+        console.log(`Stored AccessToken record in DB with ID: ${tokenId}`);
 
-  console.log(`Generated token for site ${siteId}, expires at ${new Date(expiresAt * 1000).toISOString()}`);
+        // --- Generate JWT ---
+        const jwtSecret = await getJwtSecret();
+        const payload = {
+            siteId: siteId,
+            // Add any other relevant claims. Standard claims have 3-letter names:
+            // 'exp' (Expiration Time) Claim - required by jwt.sign options
+            // 'iat' (Issued At) Claim
+            // 'jti' (JWT ID) Claim - can use tokenId
+        };
+        const jwtToken = jwt.sign(payload, jwtSecret, {
+            expiresIn: jwtExpirySeconds, // Use 'expiresIn' option
+            jwtid: tokenId, // Add unique ID to JWT payload
+        });
 
-  // Call AppSync to create the AccessToken record
-  const mutation = /* GraphQL */ `
-    mutation CreateAccessToken($input: CreateAccessTokenInput!) {
-        createAccessToken(input: $input) {
-            token
-            siteId
-            expiresAt
+        console.log(`Generated JWT for siteId: ${siteId}`);
+
+        // --- Return JWT Token ---
+        return {
+            token: jwtToken, // Return the actual JWT string
+            expiresAt: expiresAtSeconds, // Return expiry for client info
+        };
+
+    } catch (error) {
+        console.error('Error generating access token:', error);
+        // Handle specific errors (e.g., DynamoDB errors, JWT signing errors)
+        if (error instanceof Error) {
+             throw new Error(`Token generation failed: ${error.message}`);
+        } else {
+             throw new Error("An unknown error occurred during token generation.");
         }
     }
-  `;
-  const variables = {
-    input: {
-      token: token,
-      siteId: siteId,
-      expiresAt: expiresAt,
-    },
-  };
-
-  try {
-    await callAppSync(mutation, variables); // Using placeholder
-    console.log(`AccessToken record created for token ${token}`);
-
-    return {
-      siteId,
-      token,
-      expiresAt,
-    };
-  } catch (error) {
-    console.error('Failed to create AccessToken record:', error);
-    // Don't return the token if storing it failed
-    throw new Error('Failed to generate access link token.');
-  }
-};
-
-// --- Placeholder for AppSync client call --- (Replace with actual implementation)
-async function callAppSync(query: string, variables: any): Promise<any> {
-    console.warn('callAppSync function is a placeholder!');
-    console.log(`AppSync Call: Query=${query.substring(0,100)}..., Vars=${JSON.stringify(variables)}`);
-    // TODO: Use fetch API with AWS SigV4 signing (e.g., using @aws-sdk/signature-v4)
-    // or a dedicated AppSync client library configured for IAM auth.
-    // Construct endpoint: `https://${appsyncApiId}.appsync-api.${appsyncRegion}.amazonaws.com/graphql`
-
-    // Simulate success for now
-    return { data: { createAccessToken: variables.input } };
-}
-// --- End AppSync Placeholder --- 
+}; 

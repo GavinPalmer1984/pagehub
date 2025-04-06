@@ -1,8 +1,12 @@
 import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
-// Import the authorizer function using the correct relative path
+// Import the REAL authorizer function (will be used in Stage 2)
 import { tokenAuthorizerFunction } from '../functions/token-authorizer/resource';
-// Import the token generator function using the correct relative path
+// Import the DUMMY authorizer function for Stage 1
+import { dummyAuthorizerFunction } from '../functions/dummy-authorizer/resource';
+// Import the token generator function (still needed by other parts)
 import { tokenGeneratorFunction } from '../functions/token-generator/resource';
+// Import createSite function (to link to mutation)
+import { createSite as createSiteFunction } from '../functions/create-site/resource';
 // We will import the Lambda authorizer function later
 // import { tokenAuthorizerFunction } from './functions/token-authorizer/resource';
 
@@ -23,7 +27,7 @@ const schema = a.schema({
       // userLinks relationship removed
       // TODO: Add fields for domain/subdomain later
     })
-    // Indicate that this model uses the custom Lambda authorizer
+    // Use custom Lambda authorization
     .authorization((allow) => [allow.custom()])
     ,
 
@@ -37,7 +41,7 @@ const schema = a.schema({
       siteId: a.id().required(),
       site: a.belongsTo('Site', 'siteId'),
     })
-    // Indicate that this model uses the custom Lambda authorizer
+    // Use custom Lambda authorization
     .authorization((allow) => [allow.custom()])
     ,
 
@@ -56,13 +60,20 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('siteId'), // Allow querying tokens by siteId if needed
     ])
-    // Indicate that this model uses the custom Lambda authorizer
-    // (though access will be further restricted by IAM grants in backend.ts)
+    // Use custom Lambda authorization
     .authorization((allow) => [allow.custom()])
     ,
 
-  // createSite mutation removed - site creation handled by admin process
-
+  // createSite mutation is now handled via direct Lambda invocation, remove from schema
+  /*
+  // NEW: Define the createSite mutation
+  createSite: a
+    .mutation() // Define as a mutation
+    .arguments({ name: a.string().required() }) // Define input arguments
+    .returns(a.ref('Site')) // Define the return type (references the Site model)
+    .handler(a.handler.function(createSiteFunction)) // Connect to the createSite Lambda function
+    .authorization((allow) => [allow.apiKey()]) // Secure with API Key (Trusting docs over linter)
+  */
 }); // End of schema definition
 
 export type Schema = ClientSchema<typeof schema>;
@@ -70,16 +81,23 @@ export type Schema = ClientSchema<typeof schema>;
 export const data = defineData({
   schema,
   authorizationModes: {
-    // Set Lambda as the default authorization mode
+    // Set Lambda as the default authorization mode for general operations
     defaultAuthorizationMode: 'lambda',
+    // Configure the Lambda authorizer using the REAL JWT authorizer function
     lambdaAuthorizationMode: {
-      function: tokenAuthorizerFunction, // Link the authorizer function
-      // Use the correct property name for TTL
-      timeToLiveInSeconds: 300, // Cache results for 5 minutes
+      function: tokenAuthorizerFunction, // Use the REAL token authorizer function
+      timeToLiveInSeconds: 300, // Optional: Cache results
     },
-    // Remove explicit IAM mode; assume IAM calls are allowed if role has permissions
-    // iamAuthorizationMode: 'enabled'
+    // DO NOT configure additional modes here
   },
+  // API Key auth is not needed for the schema itself anymore
+  /*
+  apiKeyConfig: {
+    // description: 'PageHub Admin API Key', // Optional description
+    expiresInDays: 30, // Example: Set API key expiry (default is 7 days)
+    // name: 'pagehub-admin-key' // Optional custom name for the key
+  }
+  */
 });
 
 /*== STEP 2 ===============================================================

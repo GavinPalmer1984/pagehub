@@ -1,135 +1,233 @@
-import { S3Client, CreateBucketCommand, PutBucketWebsiteCommand, PutBucketVersioningCommand, PutObjectCommand } from '@aws-sdk/client-s3';
-// Import AppSync client or types if needed later
-// Assume LLM client/function exists
+import { S3Client, CreateBucketCommand, PutBucketWebsiteCommand, PutBucketPolicyCommand, PutBucketVersioningCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 
 // Input event for direct Lambda invocation
 interface CreateSiteEvent {
-  name: string;
-  seedPrompt: string; // Prompt to generate initial index.html
+  siteName: string;
+  adminApiKey: string;
 }
 
 // Define the expected return type
 interface CreateSiteResult {
   siteId: string;
+  name: string;
   s3BucketName: string;
-  initialVersionId: string;
+  creationDate: string;
+  message: string;
 }
 
 // TODO: Get region and LLM function name from environment variables
 const region = process.env.AWS_REGION || 'us-east-1';
-const llmFunctionName = process.env.LLM_FUNCTION_NAME || 'pagehub-llm-handler'; // Placeholder
+const llmFunctionName = process.env.LLM_FUNCTION_NAME || 'pagehub-llm-handler';
+const adminApiKeySecretArn = process.env.ADMIN_API_KEY_SECRET_ARN;
+const siteTableName = process.env.SITE_TABLE_NAME;
 
 const s3 = new S3Client({ region });
-const lambdaClient = new LambdaClient({ region });
+const lambda = new LambdaClient({ region });
+const secretsManager = new SecretsManagerClient({ region });
+const ddbClient = new DynamoDBClient({ region });
+const docClient = DynamoDBDocumentClient.from(ddbClient);
 
-// Helper function to generate unique bucket name
-const generateBucketName = (siteName: string): string => {
-  const safeName = siteName.toLowerCase().replace(/[^a-z0-9-]/g, '-').substring(0, 30);
-  const uniqueId = uuidv4().substring(0, 8);
-  // Bucket names must be globally unique, lowercase, 3-63 chars, start/end with letter/number
-  return `pagehub-site-${safeName}-${uniqueId}`;
+// Helper function to validate the Admin API Key
+const validateAdminApiKey = async (providedApiKey: string | undefined): Promise<void> => {
+    if (!adminApiKeySecretArn) {
+        console.error('Admin API Key Secret ARN not configured.');
+        throw new Error('Configuration error [Admin API Key].');
+    }
+    if (!providedApiKey) {
+        throw new Error('Admin API Key not provided.');
+    }
+    try {
+        const command = new GetSecretValueCommand({ SecretId: adminApiKeySecretArn });
+        const data = await secretsManager.send(command);
+        const storedApiKey = data.SecretString;
+
+        // Basic check: Does the stored key exist and match the provided key?
+        if (!storedApiKey || providedApiKey !== storedApiKey) {
+            console.warn('Invalid Admin API Key provided.');
+            throw new Error('Unauthorized: Invalid Admin API Key.');
+        }
+        console.log('Admin API Key validated.');
+    } catch (error) {
+        console.error('Error validating Admin API Key:', error);
+        // Rethrow specific error types if needed, otherwise generic unauthorized
+        if (error instanceof Error && error.message.includes('Invalid Admin API Key')) {
+            throw error;
+        }
+        throw new Error('Unauthorized: Could not validate Admin API Key.');
+    }
 };
 
-export const handler = async (
-  event: CreateSiteEvent
-): Promise<CreateSiteResult> => {
-  console.log(`Event: ${JSON.stringify(event)}`);
+export const handler = async (event: CreateSiteEvent): Promise<CreateSiteResult> => {
+    console.log(`Event: ${JSON.stringify(event)}`);
 
-  const { name, seedPrompt } = event;
-  const siteId = uuidv4();
-  const s3BucketName = generateBucketName(name);
-  const creationDate = new Date();
+    const { siteName, adminApiKey } = event;
 
-  console.log(`Creating site: ${name} (ID: ${siteId}) in bucket: ${s3BucketName}`);
+    // --- Authorization Check ---
+    await validateAdminApiKey(adminApiKey);
+    // --- End Authorization Check ---
 
-  try {
-    // 1. Call LLM Lambda to generate initial index.html
-    console.log(`Invoking LLM function: ${llmFunctionName}`);
-    const llmPayload = { prompt: seedPrompt };
-    const invokeCommand = new InvokeCommand({
-      FunctionName: llmFunctionName,
-      Payload: JSON.stringify(llmPayload),
-    });
-    const llmResponse = await lambdaClient.send(invokeCommand);
-    const llmResult = JSON.parse(Buffer.from(llmResponse.Payload || new Uint8Array()).toString());
-
-    if (llmResponse.FunctionError || !llmResult || !llmResult.htmlContent) {
-        throw new Error(`LLM function execution failed or returned invalid data: ${llmResponse.FunctionError || JSON.stringify(llmResult)}`);
+    // --- Input Validation ---
+    if (!siteName) {
+        throw new Error('Missing required input: siteName');
     }
-    const initialHtml = llmResult.htmlContent;
-    console.log('LLM generated initial HTML.');
-
-    // 2. Create S3 bucket
-    await s3.send(new CreateBucketCommand({ Bucket: s3BucketName }));
-    console.log(`Bucket ${s3BucketName} created.`);
-
-    // 3. Configure static website hosting
-    await s3.send(new PutBucketWebsiteCommand({
-      Bucket: s3BucketName,
-      WebsiteConfiguration: {
-        IndexDocument: { Suffix: 'index.html' },
-        // ErrorDocument: { Key: 'error.html' }, // Optional error page
-      },
-    }));
-    console.log(`Bucket ${s3BucketName} configured for static hosting.`);
-
-    // 4. Enable versioning
-    await s3.send(new PutBucketVersioningCommand({
-        Bucket: s3BucketName,
-        VersioningConfiguration: { Status: 'Enabled' }
-    }));
-    console.log(`Versioning enabled for bucket ${s3BucketName}.`);
-
-    // 5. Upload initial index.html
-    const putObjectCmd = new PutObjectCommand({
-      Bucket: s3BucketName,
-      Key: 'index.html',
-      Body: initialHtml,
-      ContentType: 'text/html',
-    });
-    const putObjectResult = await s3.send(putObjectCmd);
-    const initialVersionId = putObjectResult.VersionId;
-    if (!initialVersionId) {
-        throw new Error('Failed to get VersionId after uploading initial index.html');
+    if (!siteTableName) {
+        throw new Error('Server configuration error: SITE_TABLE_NAME not set.');
     }
-    console.log(`Uploaded initial index.html (Version ID: ${initialVersionId})`);
+    // Basic name validation (e.g., prevent excessively long names or specific characters)
+    if (siteName.length > 100 || !/^[a-zA-Z0-9\s\-_]+$/.test(siteName)) {
+      throw new Error('Invalid siteName. Use letters, numbers, spaces, hyphens, underscores (max 100 chars).');
+    }
 
-    // 6. Create Site record in DynamoDB (via AppSync mutation)
-    // TODO: Implement AppSync mutation call using AWS SDK v3
-    //       - Need AppSync endpoint URL (from env var or backend definition)
-    //       - Need IAM permissions granted in backend.ts
-    //       - Construct GraphQL mutation string
-    // const createSiteMutation = /* GraphQL mutation string */;
-    // const variables = { input: { id: siteId, name, creationDate: creationDate.toISOString(), s3BucketName, currentVersionId: initialVersionId } };
-    // const appSyncResult = await callAppSync(createSiteMutation, variables);
-    console.log('TODO: Create Site record via AppSync');
+    // --- Generate Unique Resources ---
+    const siteId = randomUUID();
+    // Generate a globally unique bucket name incorporating the site ID
+    const s3BucketName = `pagehub-site-${siteId.substring(0, 8)}-${Date.now()}`.toLowerCase();
+    const creationDate = new Date();
+    const creationDateISO = creationDate.toISOString();
 
-    // 7. Create initial SiteVersion record in DynamoDB (via AppSync mutation)
-    // TODO: Implement AppSync mutation call
-    // const createVersionMutation = /* GraphQL mutation string */;
-    // const versionVariables = { input: { siteId, s3ObjectVersionId: initialVersionId, timestamp: creationDate.toISOString() } };
-    // await callAppSync(createVersionMutation, versionVariables);
-    console.log('TODO: Create SiteVersion record via AppSync');
+    console.log(`Attempting to create site: ID=${siteId}, Name=${siteName}, Bucket=${s3BucketName}`);
 
-    // 8. Return result
-    return {
-      siteId,
-      s3BucketName,
-      initialVersionId,
-    };
+    try {
+        // --- Create S3 Bucket ---
+        console.log(`Creating S3 bucket: ${s3BucketName}`);
+        await s3.send(new CreateBucketCommand({ Bucket: s3BucketName }));
 
-  } catch (error) {
-    console.error("Error creating site:", error);
-    // TODO: Implement cleanup logic (e.g., delete bucket if partially created?)
-    throw error; // Re-throw error for Lambda to handle
-  }
-};
+        // --- Configure Bucket for Static Hosting ---
+        console.log(`Configuring bucket website hosting...`);
+        await s3.send(new PutBucketWebsiteCommand({
+            Bucket: s3BucketName,
+            WebsiteConfiguration: {
+                IndexDocument: { Suffix: 'index.html' },
+                ErrorDocument: { Key: 'error.html' }, // Optional error page
+            },
+        }));
 
-// Placeholder for AppSync client call - replace with actual implementation
-async function callAppSync(query: string, variables: any): Promise<any> {
-    console.warn('callAppSync function is a placeholder!');
-    // Use AppSync client or fetch API with IAM signature (aws4)
-    return { data: { /* mocked response */ } };
-} 
+        // --- Enable Versioning ---
+        console.log(`Enabling bucket versioning...`);
+        await s3.send(new PutBucketVersioningCommand({
+            Bucket: s3BucketName,
+            VersioningConfiguration: { Status: 'Enabled' },
+        }));
+
+        // --- Set Public Read Policy ---
+        // WARNING: This makes the entire bucket public. Use CloudFront later for better control.
+        console.log(`Setting public read policy...`);
+        const publicPolicy = {
+            Version: "2012-10-17",
+            Statement: [{
+                Sid: "PublicReadGetObject",
+                Effect: "Allow",
+                Principal: "*",
+                Action: "s3:GetObject",
+                Resource: `arn:aws:s3:::${s3BucketName}/*`
+            }]
+        };
+        await s3.send(new PutBucketPolicyCommand({
+            Bucket: s3BucketName,
+            Policy: JSON.stringify(publicPolicy),
+        }));
+
+        // --- Create Initial index.html (with bouncing ball placeholder) ---
+        console.log(`Creating initial index.html...`);
+
+        // Define the JavaScript separately
+        const scriptContent = `
+            const ball = document.getElementById('ball');
+            const colors = ['#ff6347', '#ffa500', '#ffd700', '#90ee90', '#add8e6', '#8a2be2', '#ff69b4'];
+            let x_pos = Math.random() * (window.innerWidth - 50); // Renamed variable
+            let y_pos = Math.random() * (window.innerHeight - 50); // Renamed variable
+            let vx = (Math.random() - 0.5) * 10;
+            let vy = (Math.random() - 0.5) * 10;
+            let colorIndex = 0;
+
+            function animate() {
+                x_pos += vx; y_pos += vy;
+                if (x_pos <= 0 || x_pos >= window.innerWidth - 50) { vx *= -1; changeColor(); }
+                if (y_pos <= 0 || y_pos >= window.innerHeight - 50) { vy *= -1; changeColor(); }
+                x_pos = Math.max(0, Math.min(x_pos, window.innerWidth - 50));
+                y_pos = Math.max(0, Math.min(y_pos, window.innerHeight - 50));
+                ball.style.transform = 'translate(' + x_pos + 'px, ' + y_pos + 'px)'; // Use concatenation
+                requestAnimationFrame(animate);
+            }
+
+            function changeColor() {
+                colorIndex = (colorIndex + 1) % colors.length;
+                ball.style.backgroundColor = colors[colorIndex];
+            }
+
+            ball.style.transform = 'translate(' + x_pos + 'px, ' + y_pos + 'px)'; // Use concatenation
+            ball.style.backgroundColor = colors[colorIndex];
+            animate();
+        `;
+
+        // Construct the HTML using the separate script content
+        const initialContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${siteName}</title>
+    <style>
+        body { background-color: #1a1a1a; color: #e0e0e0; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; margin: 0; overflow: hidden; }
+        .container { text-align: center; z-index: 10; }
+        h1 { font-size: 2.5em; margin-bottom: 20px; }
+        #ball { position: absolute; width: 50px; height: 50px; border-radius: 50%; background-color: red; will-change: transform; }
+        footer { position: absolute; bottom: 10px; font-size: 0.8em; color: #555; }
+    </style>
+</head>
+<body>
+    <div class="container"><h1 >Work In Progress</h1><p>Site: ${siteName} (ID: ${siteId})</p></div><div id="ball"></div >
+    <footer>Created by PageHub - ${creationDateISO}</footer>
+    <script>
+${scriptContent}
+    </script>
+</body>
+</html>`;
+
+        const putObjectCommand = new PutObjectCommand({
+            Bucket: s3BucketName,
+            Key: 'index.html',
+            Body: initialContent,
+            ContentType: 'text/html',
+        });
+        const putObjectResult = await s3.send(putObjectCommand);
+        const initialS3VersionId = putObjectResult.VersionId || 'unknown';
+        console.log(`Initial index.html uploaded. VersionId: ${initialS3VersionId}`);
+
+        // --- Create Site Record in DynamoDB ---
+        console.log(`Creating Site record in DynamoDB table: ${siteTableName}`);
+        const siteItem = {
+            id: siteId,
+            name: siteName,
+            s3BucketName: s3BucketName,
+            creationDate: creationDateISO,
+        };
+        await docClient.send(new PutCommand({
+            TableName: siteTableName,
+            Item: siteItem,
+        }));
+        console.log(`DynamoDB Site record created for ID: ${siteId}`);
+
+        // --- Return Success ---
+        const result: CreateSiteResult = {
+            siteId: siteId,
+            name: siteName,
+            s3BucketName: s3BucketName,
+            creationDate: creationDateISO,
+            message: `Site '${siteName}' created successfully. Bucket: ${s3BucketName}`,
+        };
+        console.log("Site creation process completed successfully.", result);
+        return result;
+
+    } catch (error) {
+        console.error('Error during site creation process:', error);
+        // Consider adding cleanup logic here (e.g., delete S3 bucket if partially created)
+        // Re-throw a user-friendly error
+        throw new Error(`Failed to create site '${siteName}': ${error instanceof Error ? error.message : String(error)}`);
+    }
+}; 

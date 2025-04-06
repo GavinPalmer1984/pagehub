@@ -7,7 +7,8 @@ import { data } from './data/resource';
 import { createSite as createSiteFunction } from './functions/create-site/resource';
 import { llmHandlerFunction } from './functions/llm-handler/resource';
 import { tokenGeneratorFunction } from './functions/token-generator/resource'; // Import token generator
-import { tokenAuthorizerFunction } from './functions/token-authorizer/resource'; // Import authorizer
+import { tokenAuthorizerFunction } from './functions/token-authorizer/resource'; // Import real authorizer
+import { dummyAuthorizerFunction } from './functions/dummy-authorizer/resource'; // Import dummy authorizer
 
 /**
  * @see https://docs.amplify.aws/gen2/build-a-backend/
@@ -18,7 +19,8 @@ const backend = defineBackend({
   createSiteFunction,
   llmHandlerFunction,
   tokenGeneratorFunction, // Add token generator
-  tokenAuthorizerFunction, // Add authorizer
+  tokenAuthorizerFunction, // Keep real one defined, but config commented out below
+  dummyAuthorizerFunction, // Add dummy authorizer for Stage 1
 });
 
 // Permissions for createSiteFunction removed
@@ -32,14 +34,19 @@ const apiId = backend.data.resources.graphqlApi.apiId;
 const region = Stack.of(backend.data).region;
 const accountId = Stack.of(backend.data).account;
 const appsyncApiArn = backend.data.resources.graphqlApi.arn;
+const accessTokenTableName = backend.data.resources.tables.AccessToken.tableName;
+const accessTokenTableArn = backend.data.resources.tables.AccessToken.tableArn;
+const siteTableName = backend.data.resources.tables.Site.tableName; // Get Site table name
+const siteTableArn = backend.data.resources.tables.Site.tableArn; // Get Site table ARN
+// Use the ARN provided by the user, or an env variable if set
+const jwtSecretArn = process.env.JWT_SECRET_ARN || 'arn:aws:secretsmanager:us-east-1:842517602170:secret:pagehub/jwtSigningKey-VqLJ5L';
 
 // --- createSiteFunction Configuration ---
 backend.createSiteFunction.addEnvironment('ADMIN_API_KEY_SECRET_ARN', adminApiKeySecretArn);
-backend.createSiteFunction.addEnvironment('APPSYNC_API_ID', apiId);
-backend.createSiteFunction.addEnvironment('AWS_REGION_FOR_APPSYNC', region);
 backend.createSiteFunction.addEnvironment('LLM_FUNCTION_NAME', backend.llmHandlerFunction.resources.lambda.functionName);
+backend.createSiteFunction.addEnvironment('SITE_TABLE_NAME', siteTableName); // Add Site table name env var
 
-// Add permission to read the Admin API Key Secret
+// Grant access to Admin Key Secret
 backend.createSiteFunction.resources.lambda.addToRolePolicy(
   new iam.PolicyStatement({
     effect: iam.Effect.ALLOW,
@@ -57,18 +64,6 @@ backend.createSiteFunction.resources.lambda.addToRolePolicy(
 })
 );
 
-// Grant permissions to interact with its own AppSync API
-// Note: This grants broad access to call any mutation/query via IAM.
-// Consider refining this if possible, but IAM auth needs to be enabled on the API.
-// We set default to IAM in data/resource.ts, so this should allow the calls.
-backend.createSiteFunction.resources.lambda.addToRolePolicy(
-  new iam.PolicyStatement({
-    effect: iam.Effect.ALLOW,
-    actions: ['appsync:GraphQL'],
-    resources: [appsyncApiArn + '/*'], // Broad access for now
-})
-);
-
 // Grant S3 permissions (Bucket creation is broad, refine if possible)
 backend.createSiteFunction.resources.lambda.addToRolePolicy(
   new iam.PolicyStatement({
@@ -79,17 +74,30 @@ backend.createSiteFunction.resources.lambda.addToRolePolicy(
       's3:PutBucketPolicy',
       's3:PutBucketVersioning',
       's3:PutObject',
-      's3:PutObjectAcl' // May need for initial public read?
+      // 's3:PutObjectAcl' // ACL might not be needed with bucket policy
     ],
+    // Ensure resource ARN covers expected bucket names
     resources: ['arn:aws:s3:::pagehub-site-*', 'arn:aws:s3:::pagehub-site-*/*'],
+})
+);
+
+// Grant DynamoDB PutItem permission for the Site table
+backend.createSiteFunction.resources.lambda.addToRolePolicy(
+  new iam.PolicyStatement({
+    effect: iam.Effect.ALLOW,
+    actions: ['dynamodb:PutItem'],
+    resources: [siteTableArn], // Use the specific Site table ARN
 })
 );
 
 // --- tokenGeneratorFunction Configuration ---
 backend.tokenGeneratorFunction.addEnvironment('ADMIN_API_KEY_SECRET_ARN', adminApiKeySecretArn);
-backend.tokenGeneratorFunction.addEnvironment('APPSYNC_API_ID', apiId);
-backend.tokenGeneratorFunction.addEnvironment('AWS_REGION_FOR_APPSYNC', region);
+backend.tokenGeneratorFunction.addEnvironment('ACCESS_TOKEN_TABLE_NAME', accessTokenTableName);
+backend.tokenGeneratorFunction.addEnvironment('JWT_SECRET_ARN', jwtSecretArn);
+// Optionally add JWT_EXPIRY_SECONDS if you want to override the default in the handler
+// backend.tokenGeneratorFunction.addEnvironment('JWT_EXPIRY_SECONDS', '86400'); // e.g., 24 hours
 
+// Grant access to Admin Key Secret
 backend.tokenGeneratorFunction.resources.lambda.addToRolePolicy(
   new iam.PolicyStatement({
     effect: iam.Effect.ALLOW,
@@ -97,38 +105,34 @@ backend.tokenGeneratorFunction.resources.lambda.addToRolePolicy(
     resources: [adminApiKeySecretArn],
 })
 );
+// Grant access to JWT Signing Key Secret
 backend.tokenGeneratorFunction.resources.lambda.addToRolePolicy(
   new iam.PolicyStatement({
     effect: iam.Effect.ALLOW,
-    actions: ['appsync:GraphQL'],
-    // Grant permission specifically for the createAccessToken mutation
-    resources: [appsyncApiArn + '/types/Mutation/fields/createAccessToken'],
+    actions: ['secretsmanager:GetSecretValue'],
+    resources: [jwtSecretArn],
+})
+);
+// Grant permission to write to the AccessToken table
+backend.tokenGeneratorFunction.resources.lambda.addToRolePolicy(
+  new iam.PolicyStatement({
+    effect: iam.Effect.ALLOW,
+    actions: ['dynamodb:PutItem'],
+    resources: [accessTokenTableArn],
 })
 );
 
 // --- tokenAuthorizerFunction Configuration ---
-// Remove AppSync env vars, add table name env var
-// backend.tokenAuthorizerFunction.addEnvironment('APPSYNC_API_ID', apiId);
-// backend.tokenAuthorizerFunction.addEnvironment('AWS_REGION_FOR_APPSYNC', region);
-// backend.tokenAuthorizerFunction.addEnvironment('AWS_ACCOUNT_ID', accountId);
-backend.tokenAuthorizerFunction.addEnvironment(
-    'ACCESS_TOKEN_TABLE_NAME',
-    // Construct the table name or get reference from `data` resource
-    // Option 1: Construct name (less robust if naming changes)
-    // `AccessToken-${apiId}-${Stack.of(backend.data).stackName}`
-    // Option 2: Get reference (better)
-    backend.data.resources.tables.AccessToken.tableName
-);
+backend.tokenAuthorizerFunction.addEnvironment('JWT_SECRET_ARN', jwtSecretArn);
 
-// Grant permission to read from the AccessToken table
+// Grant access to JWT Signing Key Secret
 backend.tokenAuthorizerFunction.resources.lambda.addToRolePolicy(
   new iam.PolicyStatement({
     effect: iam.Effect.ALLOW,
-    actions: ['dynamodb:GetItem'],
-    resources: [backend.data.resources.tables.AccessToken.tableArn],
+    actions: ['secretsmanager:GetSecretValue'],
+    resources: [jwtSecretArn],
 })
 );
 
 // --- llmHandlerFunction Configuration (Placeholder) ---
 // TODO: Grant permissions for Anthropic API access (e.g., Secrets Manager)
-// TODO: Add environment variables (e.g., API Key Secret ARN)
