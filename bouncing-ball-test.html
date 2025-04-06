@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local Test Site</title>
+    <style>
+        body { background-color: #1a1a1a; color: #e0e0e0; font-family: sans-serif; min-height: 100vh; margin: 0; overflow: hidden; }
+        .container { text-align: center; z-index: 10; padding-top: 40vh; }
+        h1 { font-size: 2.5em; margin-bottom: 20px; }
+        /* Style for all balls using a class */
+        .ball { position: absolute; width: 50px; height: 50px; border-radius: 50%; will-change: transform; top: 0; left: 0; }
+        footer { position: absolute; bottom: 10px; width: 100%; text-align: center; font-size: 0.8em; color: #555; }
+    </style>
+</head>
+<body>
+    <div class="container"><h1 >Work In Progress</h1><p>Site: Local Test Site (ID: local-test-id-123)</p></div>
+
+    <!-- Add divs for multiple balls -->
+    <div id="ball-0" class="ball"></div>
+    <div id="ball-1" class="ball"></div>
+    <div id="ball-2" class="ball"></div>
+
+    <footer>Created by PageHub - 2025-04-06T23:30:58.684Z</footer>
+    <script>
+
+        const numBalls = 3;
+        const balls = [];
+        const colors = ['#ff6347', '#ffa500', '#ffd700', '#90ee90', '#add8e6', '#8a2be2', '#ff69b4'];
+        const ballSize = 50;
+        const ballRadius = ballSize / 2;
+
+        let mouseX = -100;
+        let mouseY = -100;
+
+        // --- Initialize Balls ---
+        for (let i = 0; i < numBalls; i++) {
+            const ballElement = document.getElementById(`ball-${i}`);
+            if (!ballElement) continue;
+
+            const initialVx = (Math.random() - 0.5) * 10;
+            const initialVy = (Math.random() - 0.5) * 10;
+
+            balls.push({
+                element: ballElement,
+                x: Math.random() * (window.innerWidth - ballSize),
+                y: Math.random() * (window.innerHeight - ballSize),
+                vx: initialVx,
+                vy: initialVy,
+                colorIndex: i % colors.length,
+                recentlyBouncedOffMouse: false
+            });
+            ballElement.style.backgroundColor = colors[balls[i].colorIndex];
+            ballElement.style.transform = 'translate(' + balls[i].x + 'px, ' + balls[i].y + 'px)';
+        }
+
+        // --- Event Listener for Mouse Movement ---
+        document.addEventListener('mousemove', (event) => {
+            mouseX = event.clientX;
+            mouseY = event.clientY;
+        });
+
+        // --- Animation Loop ---
+        function animate() {
+            const winWidth = window.innerWidth;
+            const winHeight = window.innerHeight;
+
+            balls.forEach((ball, index) => {
+                // Update position
+                ball.x += ball.vx;
+                ball.y += ball.vy;
+
+                // 1. Wall Boundary checks & corrections
+                let bouncedWall = false;
+                if (ball.x <= 0) { ball.x = 0; ball.vx *= -1; bouncedWall = true; }
+                else if (ball.x >= winWidth - ballSize) { ball.x = winWidth - ballSize; ball.vx *= -1; bouncedWall = true; }
+
+                if (ball.y <= 0) { ball.y = 0; ball.vy *= -1; bouncedWall = true; }
+                else if (ball.y >= winHeight - ballSize) { ball.y = winHeight - ballSize; ball.vy *= -1; bouncedWall = true; }
+
+                if (bouncedWall) {
+                    changeBallColor(ball);
+                    ball.recentlyBouncedOffMouse = false;
+                }
+
+                // 2. Mouse Collision Check
+                const ballCenterX = ball.x + ballRadius;
+                const ballCenterY = ball.y + ballRadius;
+                const dx = ballCenterX - mouseX;
+                const dy = ballCenterY - mouseY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < ballRadius && !ball.recentlyBouncedOffMouse) {
+                    ball.vx *= -1.1;
+                    ball.vy *= -1.1;
+
+                    const overlap = ballRadius - distance;
+                    const pushX = (dx / distance) * overlap * 0.5;
+                    const pushY = (dy / distance) * overlap * 0.5;
+                    ball.x += pushX;
+                    ball.y += pushY;
+
+                    changeBallColor(ball);
+                    ball.recentlyBouncedOffMouse = true;
+
+                    ball.vx = Math.max(-15, Math.min(15, ball.vx)); // Reduced max speed due to halved base speed
+                    ball.vy = Math.max(-15, Math.min(15, ball.vy)); // Reduced max speed
+                } else if (distance >= ballRadius) {
+                    ball.recentlyBouncedOffMouse = false;
+                }
+
+                // Update element position
+                ball.element.style.transform = 'translate(' + ball.x + 'px, ' + ball.y + 'px)';
+            }); // End forEach loop
+
+            requestAnimationFrame(animate);
+        }
+
+        // --- Color Change Function (takes ball object) ---
+        function changeBallColor(ball) {
+            ball.colorIndex = (ball.colorIndex + 1) % colors.length;
+            ball.element.style.backgroundColor = colors[ball.colorIndex];
+        }
+
+        animate(); // Start animation
+    
+    </script>
+</body>
+</html>

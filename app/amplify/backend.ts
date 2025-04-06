@@ -9,6 +9,7 @@ import { llmHandlerFunction } from './functions/llm-handler/resource';
 import { tokenGeneratorFunction } from './functions/token-generator/resource'; // Import token generator
 import { tokenAuthorizerFunction } from './functions/token-authorizer/resource'; // Import real authorizer
 import { dummyAuthorizerFunction } from './functions/dummy-authorizer/resource'; // Import dummy authorizer
+import { deleteSiteFunction } from './functions/delete-site/resource'; // Import deleteSite function
 
 /**
  * @see https://docs.amplify.aws/gen2/build-a-backend/
@@ -21,6 +22,7 @@ const backend = defineBackend({
   tokenGeneratorFunction, // Add token generator
   tokenAuthorizerFunction, // Keep real one defined, but config commented out below
   dummyAuthorizerFunction, // Add dummy authorizer for Stage 1
+  deleteSiteFunction,    // Add deleteSite function
 });
 
 // Permissions for createSiteFunction removed
@@ -72,6 +74,7 @@ backend.createSiteFunction.resources.lambda.addToRolePolicy(
       's3:CreateBucket',
       's3:PutBucketWebsite',
       's3:PutBucketPolicy',
+      's3:PutBucketPublicAccessBlock',
       's3:PutBucketVersioning',
       's3:PutObject',
       // 's3:PutObjectAcl' // ACL might not be needed with bucket policy
@@ -131,6 +134,40 @@ backend.tokenAuthorizerFunction.resources.lambda.addToRolePolicy(
     effect: iam.Effect.ALLOW,
     actions: ['secretsmanager:GetSecretValue'],
     resources: [jwtSecretArn],
+})
+);
+
+// --- deleteSiteFunction Configuration ---
+backend.deleteSiteFunction.addEnvironment('ADMIN_API_KEY_SECRET_ARN', adminApiKeySecretArn);
+backend.deleteSiteFunction.addEnvironment('SITE_TABLE_NAME', siteTableName);
+
+// Grant access to Admin Key Secret
+backend.deleteSiteFunction.resources.lambda.addToRolePolicy(
+  new iam.PolicyStatement({
+    effect: iam.Effect.ALLOW,
+    actions: ['secretsmanager:GetSecretValue'],
+    resources: [adminApiKeySecretArn],
+})
+);
+// Grant DynamoDB permissions for Site table
+backend.deleteSiteFunction.resources.lambda.addToRolePolicy(
+  new iam.PolicyStatement({
+    effect: iam.Effect.ALLOW,
+    actions: ['dynamodb:GetItem', 'dynamodb:DeleteItem'],
+    resources: [siteTableArn],
+})
+);
+// Grant S3 permissions for deleting site buckets and contents
+backend.deleteSiteFunction.resources.lambda.addToRolePolicy(
+  new iam.PolicyStatement({
+    effect: iam.Effect.ALLOW,
+    actions: [
+      's3:ListBucketVersions',
+      's3:DeleteObjectVersion',
+      's3:DeleteBucket'
+    ],
+    // Important: Needs access to all potential site buckets
+    resources: ['arn:aws:s3:::pagehub-site-*', 'arn:aws:s3:::pagehub-site-*/*'],
 })
 );
 
