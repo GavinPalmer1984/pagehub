@@ -1,4 +1,4 @@
-import { S3Client, CreateBucketCommand, PutBucketWebsiteCommand, PutBucketPolicyCommand, PutBucketVersioningCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, CreateBucketCommand, PutBucketWebsiteCommand, PutBucketPolicyCommand, PutBucketVersioningCommand, PutObjectCommand, PutPublicAccessBlockCommand } from '@aws-sdk/client-s3';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
@@ -62,6 +62,145 @@ const validateAdminApiKey = async (providedApiKey: string | undefined): Promise<
     }
 };
 
+// --- NEW Exported Function for HTML Generation ---
+export function generateInitialHtml(siteName: string, siteId: string, creationDateISO: string): string {
+    // Define the JavaScript separately
+    const scriptContent = `
+        const numBalls = 3;
+        const balls = [];
+        const colors = ['#ff6347', '#ffa500', '#ffd700', '#90ee90', '#add8e6', '#8a2be2', '#ff69b4'];
+        const ballSize = 50;
+        const ballRadius = ballSize / 2;
+
+        let mouseX = -100;
+        let mouseY = -100;
+
+        // --- Initialize Balls ---
+        for (let i = 0; i < numBalls; i++) {
+            const ballElement = document.getElementById(\`ball-\${i}\`);
+            if (!ballElement) continue;
+
+            const initialVx = (Math.random() - 0.5) * 10;
+            const initialVy = (Math.random() - 0.5) * 10;
+
+            balls.push({
+                element: ballElement,
+                x: Math.random() * (window.innerWidth - ballSize),
+                y: Math.random() * (window.innerHeight - ballSize),
+                vx: initialVx,
+                vy: initialVy,
+                colorIndex: i % colors.length,
+                recentlyBouncedOffMouse: false
+            });
+            ballElement.style.backgroundColor = colors[balls[i].colorIndex];
+            ballElement.style.transform = 'translate(' + balls[i].x + 'px, ' + balls[i].y + 'px)';
+        }
+
+        // --- Event Listener for Mouse Movement ---
+        document.addEventListener('mousemove', (event) => {
+            mouseX = event.clientX;
+            mouseY = event.clientY;
+        });
+
+        // --- Animation Loop ---
+        function animate() {
+            const winWidth = window.innerWidth;
+            const winHeight = window.innerHeight;
+
+            balls.forEach((ball, index) => {
+                // Update position
+                ball.x += ball.vx;
+                ball.y += ball.vy;
+
+                // 1. Wall Boundary checks & corrections
+                let bouncedWall = false;
+                if (ball.x <= 0) { ball.x = 0; ball.vx *= -1; bouncedWall = true; }
+                else if (ball.x >= winWidth - ballSize) { ball.x = winWidth - ballSize; ball.vx *= -1; bouncedWall = true; }
+
+                if (ball.y <= 0) { ball.y = 0; ball.vy *= -1; bouncedWall = true; }
+                else if (ball.y >= winHeight - ballSize) { ball.y = winHeight - ballSize; ball.vy *= -1; bouncedWall = true; }
+
+                if (bouncedWall) {
+                    changeBallColor(ball);
+                    ball.recentlyBouncedOffMouse = false;
+                }
+
+                // 2. Mouse Collision Check
+                const ballCenterX = ball.x + ballRadius;
+                const ballCenterY = ball.y + ballRadius;
+                const dx = ballCenterX - mouseX;
+                const dy = ballCenterY - mouseY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < ballRadius && !ball.recentlyBouncedOffMouse) {
+                    ball.vx *= -1.1;
+                    ball.vy *= -1.1;
+
+                    const overlap = ballRadius - distance;
+                    const pushX = (dx / distance) * overlap * 0.5;
+                    const pushY = (dy / distance) * overlap * 0.5;
+                    ball.x += pushX;
+                    ball.y += pushY;
+
+                    changeBallColor(ball);
+                    ball.recentlyBouncedOffMouse = true;
+
+                    ball.vx = Math.max(-15, Math.min(15, ball.vx)); // Reduced max speed due to halved base speed
+                    ball.vy = Math.max(-15, Math.min(15, ball.vy)); // Reduced max speed
+                } else if (distance >= ballRadius) {
+                    ball.recentlyBouncedOffMouse = false;
+                }
+
+                // Update element position
+                ball.element.style.transform = 'translate(' + ball.x + 'px, ' + ball.y + 'px)';
+            }); // End forEach loop
+
+            requestAnimationFrame(animate);
+        }
+
+        // --- Color Change Function (takes ball object) ---
+        function changeBallColor(ball) {
+            ball.colorIndex = (ball.colorIndex + 1) % colors.length;
+            ball.element.style.backgroundColor = colors[ball.colorIndex];
+        }
+
+        animate(); // Start animation
+    `;
+
+    // Construct the HTML using the separate script content
+    const initialContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${siteName}</title>
+    <style>
+        body { background-color: #1a1a1a; color: #e0e0e0; font-family: sans-serif; min-height: 100vh; margin: 0; overflow: hidden; }
+        .container { text-align: center; z-index: 10; padding-top: 40vh; }
+        h1 { font-size: 2.5em; margin-bottom: 20px; }
+        /* Style for all balls using a class */
+        .ball { position: absolute; width: 50px; height: 50px; border-radius: 50%; will-change: transform; top: 0; left: 0; }
+        footer { position: absolute; bottom: 10px; width: 100%; text-align: center; font-size: 0.8em; color: #555; }
+    </style>
+</head>
+<body>
+    <div class="container"><h1 >Work In Progress</h1><p>Site: ${siteName} (ID: ${siteId})</p></div>
+
+    <!-- Add divs for multiple balls -->
+    <div id="ball-0" class="ball"></div>
+    <div id="ball-1" class="ball"></div>
+    <div id="ball-2" class="ball"></div>
+
+    <footer>Created by PageHub - ${creationDateISO}</footer>
+    <script>
+${scriptContent}
+    </script>
+</body>
+</html>`;
+
+    return initialContent;
+}
+
 export const handler = async (event: CreateSiteEvent): Promise<CreateSiteResult> => {
     console.log(`Event: ${JSON.stringify(event)}`);
 
@@ -97,6 +236,18 @@ export const handler = async (event: CreateSiteEvent): Promise<CreateSiteResult>
         console.log(`Creating S3 bucket: ${s3BucketName}`);
         await s3.send(new CreateBucketCommand({ Bucket: s3BucketName }));
 
+        // --- Explicitly Disable Public Access Block for this Bucket ---
+        console.log(`Disabling Block Public Access for bucket: ${s3BucketName}`);
+        await s3.send(new PutPublicAccessBlockCommand({
+            Bucket: s3BucketName,
+            PublicAccessBlockConfiguration: {
+                BlockPublicAcls: false,       // Allow public ACLs (might not be needed but safe to allow)
+                IgnorePublicAcls: false,      // Don't ignore public ACLs
+                BlockPublicPolicy: false,     // IMPORTANT: Allow public policies
+                RestrictPublicBuckets: false  // Don't restrict access based on public policies
+            }
+        }));
+
         // --- Configure Bucket for Static Hosting ---
         console.log(`Configuring bucket website hosting...`);
         await s3.send(new PutBucketWebsiteCommand({
@@ -114,8 +265,7 @@ export const handler = async (event: CreateSiteEvent): Promise<CreateSiteResult>
             VersioningConfiguration: { Status: 'Enabled' },
         }));
 
-        // --- Set Public Read Policy ---
-        // WARNING: This makes the entire bucket public. Use CloudFront later for better control.
+        // --- Set Public Read Policy (Re-enabled) ---
         console.log(`Setting public read policy...`);
         const publicPolicy = {
             Version: "2012-10-17",
@@ -132,74 +282,24 @@ export const handler = async (event: CreateSiteEvent): Promise<CreateSiteResult>
             Policy: JSON.stringify(publicPolicy),
         }));
 
-        // --- Create Initial index.html (with bouncing ball placeholder) ---
-        console.log(`Creating initial index.html...`);
-
-        // Define the JavaScript separately
-        const scriptContent = `
-            const ball = document.getElementById('ball');
-            const colors = ['#ff6347', '#ffa500', '#ffd700', '#90ee90', '#add8e6', '#8a2be2', '#ff69b4'];
-            let x_pos = Math.random() * (window.innerWidth - 50); // Renamed variable
-            let y_pos = Math.random() * (window.innerHeight - 50); // Renamed variable
-            let vx = (Math.random() - 0.5) * 10;
-            let vy = (Math.random() - 0.5) * 10;
-            let colorIndex = 0;
-
-            function animate() {
-                x_pos += vx; y_pos += vy;
-                if (x_pos <= 0 || x_pos >= window.innerWidth - 50) { vx *= -1; changeColor(); }
-                if (y_pos <= 0 || y_pos >= window.innerHeight - 50) { vy *= -1; changeColor(); }
-                x_pos = Math.max(0, Math.min(x_pos, window.innerWidth - 50));
-                y_pos = Math.max(0, Math.min(y_pos, window.innerHeight - 50));
-                ball.style.transform = 'translate(' + x_pos + 'px, ' + y_pos + 'px)'; // Use concatenation
-                requestAnimationFrame(animate);
-            }
-
-            function changeColor() {
-                colorIndex = (colorIndex + 1) % colors.length;
-                ball.style.backgroundColor = colors[colorIndex];
-            }
-
-            ball.style.transform = 'translate(' + x_pos + 'px, ' + y_pos + 'px)'; // Use concatenation
-            ball.style.backgroundColor = colors[colorIndex];
-            animate();
-        `;
-
-        // Construct the HTML using the separate script content
-        const initialContent = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${siteName}</title>
-    <style>
-        body { background-color: #1a1a1a; color: #e0e0e0; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; margin: 0; overflow: hidden; }
-        .container { text-align: center; z-index: 10; }
-        h1 { font-size: 2.5em; margin-bottom: 20px; }
-        #ball { position: absolute; width: 50px; height: 50px; border-radius: 50%; background-color: red; will-change: transform; }
-        footer { position: absolute; bottom: 10px; font-size: 0.8em; color: #555; }
-    </style>
-</head>
-<body>
-    <div class="container"><h1 >Work In Progress</h1><p>Site: ${siteName} (ID: ${siteId})</p></div><div id="ball"></div >
-    <footer>Created by PageHub - ${creationDateISO}</footer>
-    <script>
-${scriptContent}
-    </script>
-</body>
-</html>`;
-
+        // --- Create Initial index.html --- 
+        console.log(`Generating initial index.html...`);
+        const initialContent = generateInitialHtml(siteName, siteId, creationDateISO);
+        
+        console.log(`Uploading initial index.html...`);
         const putObjectCommand = new PutObjectCommand({
             Bucket: s3BucketName,
-            Key: 'index.html',
+            Key: 'index.html', 
             Body: initialContent,
-            ContentType: 'text/html',
+            ContentType: 'text/html', 
         });
         const putObjectResult = await s3.send(putObjectCommand);
         const initialS3VersionId = putObjectResult.VersionId || 'unknown';
+        // Use correct template literals for logging
         console.log(`Initial index.html uploaded. VersionId: ${initialS3VersionId}`);
 
-        // --- Create Site Record in DynamoDB ---
+        // --- Create Site Record in DynamoDB --- 
+        // Use correct template literals for logging
         console.log(`Creating Site record in DynamoDB table: ${siteTableName}`);
         const siteItem = {
             id: siteId,
@@ -211,9 +311,10 @@ ${scriptContent}
             TableName: siteTableName,
             Item: siteItem,
         }));
+        // Use correct template literals for logging
         console.log(`DynamoDB Site record created for ID: ${siteId}`);
 
-        // --- Return Success ---
+        // --- Return Success --- 
         const result: CreateSiteResult = {
             siteId: siteId,
             name: siteName,
@@ -226,8 +327,7 @@ ${scriptContent}
 
     } catch (error) {
         console.error('Error during site creation process:', error);
-        // Consider adding cleanup logic here (e.g., delete S3 bucket if partially created)
-        // Re-throw a user-friendly error
+        // Use correct template literal for error message
         throw new Error(`Failed to create site '${siteName}': ${error instanceof Error ? error.message : String(error)}`);
     }
 }; 
