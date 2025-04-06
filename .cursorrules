@@ -75,14 +75,16 @@ Build "PageHub", a service allowing users to create, modify, and manage version-
 - [x] Choose Frontend Framework (React)
 - [x] Initialize Amplify Gen 2 Project (`npm create amplify@latest` in `app/` dir)
 - [-] Define Cognito Authentication (`defineAuth` ...) -> Deferred for M1
-- [x] Define Initial Data Schema (`defineData` in `app/amplify/data/resource.ts` for Site, SiteVersion, AccessToken; Auth set to IAM placeholder)
-- [-] Implement Core Site Management Lambdas (`createSite`, ...) -> Admin task for M1
-- [ ] Implement LLM Integration Lambda (Gen 2/CDK in `app/amplify/functions/...`: Anthropic API call - needs token auth logic)
+- [x] Define Initial Data Schema (`defineData` in `app/amplify/data/resource.ts` for Site, SiteVersion, AccessToken; Auth set to IAM)
+- [x] Implement Admin `createSite` Lambda Structure (Gen 2/CDK in `app/amplify/functions/create-site/...`, includes S3 logic, calls LLM)
+- [x] Implement LLM Integration Lambda Structure (Placeholder) (Gen 2/CDK in `app/amplify/functions/llm-handler/...`)
+- [ ] Implement `createSite` Lambda DB Calls (AppSync/DynamoDB interactions)
+- [ ] Implement LLM Lambda Logic (Anthropic API call)
 - [ ] Implement Token Generation Lambda (Admin only)
 - [ ] Implement AppSync Lambda Authorizer (`tokenAuthorizerFunction`)
 - [ ] Implement Basic Frontend UI (In `app/src/`, receives token/siteId from URL, uses token for API calls, Prompt Input, Site Preview)
-- [ ] Implement Basic Versioning Logic (S3 versions via SDK in Lambdas, DynamoDB metadata via AppSync)
-- [ ] Implement Basic S3 Hosting for User Sites (Bucket creation via Admin process/script)
+- [ ] Implement Basic Versioning Logic (Triggered by site updates, modifies `SiteVersion`)
+- [x] Implement Basic S3 Hosting for User Sites (Handled within `createSite` Lambda)
 - [ ] Add Basic Cost Display/Estimation Logic (Display estimated cost of LLM calls/S3 storage)
 
 *(Future Milestones - Post M1)*
