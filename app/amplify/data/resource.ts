@@ -23,7 +23,8 @@ const schema = a.schema({
       // userLinks relationship removed
       // TODO: Add fields for domain/subdomain later
     })
-    // No specific model-level authorization rules; handled by Lambda authorizer
+    // Indicate that this model uses the custom Lambda authorizer
+    .authorization((allow) => [allow.custom()])
     ,
 
   SiteVersion: a
@@ -36,7 +37,8 @@ const schema = a.schema({
       siteId: a.id().required(),
       site: a.belongsTo('Site', 'siteId'),
     })
-    // No specific model-level authorization rules; handled by Lambda authorizer
+    // Indicate that this model uses the custom Lambda authorizer
+    .authorization((allow) => [allow.custom()])
     ,
 
   // UserSiteLink model removed
@@ -54,7 +56,9 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('siteId'), // Allow querying tokens by siteId if needed
     ])
-    // Remove model-level authorization; rely on IAM grants in backend.ts
+    // Indicate that this model uses the custom Lambda authorizer
+    // (though access will be further restricted by IAM grants in backend.ts)
+    .authorization((allow) => [allow.custom()])
     ,
 
   // createSite mutation removed - site creation handled by admin process
@@ -70,6 +74,8 @@ export const data = defineData({
     defaultAuthorizationMode: 'lambda',
     lambdaAuthorizationMode: {
       function: tokenAuthorizerFunction, // Link the authorizer function
+      // Use the correct property name for TTL
+      timeToLiveInSeconds: 300, // Cache results for 5 minutes
     },
     // Remove explicit IAM mode; assume IAM calls are allowed if role has permissions
     // iamAuthorizationMode: 'enabled'
