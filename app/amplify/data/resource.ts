@@ -1,10 +1,8 @@
 import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
-// Import the authorizer function
-// @ts-ignore - Assume file exists, may be temporary cache issue
-import { tokenAuthorizerFunction } from './functions/token-authorizer/resource';
-// Import the token generator function (needed for AccessToken auth rule)
-// @ts-ignore - Assume file exists, may be temporary cache issue
-import { tokenGeneratorFunction } from './functions/token-generator/resource';
+// Import the authorizer function using the correct relative path
+import { tokenAuthorizerFunction } from '../functions/token-authorizer/resource';
+// Import the token generator function using the correct relative path
+import { tokenGeneratorFunction } from '../functions/token-generator/resource';
 // We will import the Lambda authorizer function later
 // import { tokenAuthorizerFunction } from './functions/token-authorizer/resource';
 
