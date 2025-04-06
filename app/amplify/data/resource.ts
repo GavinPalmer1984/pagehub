@@ -13,6 +13,7 @@ const schema = a.schema({
       name: a.string().required(),
       // owner field removed for link-based access
       creationDate: a.datetime().required(),
+      s3BucketName: a.string().required(), // Added bucket name field
       currentVersionId: a.id(), // Link to the currently published version
       versions: a.hasMany('SiteVersion', 'siteId'),
       // userLinks relationship removed
