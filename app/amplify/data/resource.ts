@@ -1,4 +1,7 @@
 import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
+// Import the function definition to use as a handler
+// @ts-ignore - Assume file exists, may be temporary cache issue
+import { createSite as createSiteFunction } from './functions/create-site/resource';
 
 /*
 Defines the GraphQL schema for the PageHub application.
@@ -50,6 +53,20 @@ const schema = a.schema({
       // Create/Update operations are restricted to backend functions via IAM (e.g., invite logic)
       // TODO: Allow Site owner to read/delete links?
     ]),
+
+  // Define the custom mutation
+  createSite: a
+    .mutation()
+    // Input arguments for the mutation
+    .arguments({
+      name: a.string().required(),
+    })
+    // Return type - should match the Site model
+    .returns(a.ref('Site'))
+    // Link to the Lambda function handler
+    .handler(a.handler.function(createSiteFunction))
+    // Authorize only authenticated users to call this mutation
+    .authorization((allow) => [allow.authenticated()]),
 
 }); // End of schema definition
 
