@@ -24,19 +24,25 @@ const backend = defineBackend({
 // NOTE: We will add Lambda functions for token generation and
 // authorization later, along with their necessary permissions.
 
-// --- createSiteFunction Permissions and Environment ---
-
-// Get the API ID and AWS Region
+// --- Common Variables ---
+const adminApiKeySecretArn = process.env.ADMIN_API_KEY_SECRET_ARN || 'arn:aws:secretsmanager:us-east-1:842517602170:secret:pagehub/adminApiKey-EQCtuJ';
 const apiId = backend.data.resources.graphqlApi.apiId;
-const region = Stack.of(backend.data).region; // Get region from the stack
+const region = Stack.of(backend.data).region;
+const appsyncApiArn = backend.data.resources.graphqlApi.arn;
 
-// Add environment variables
+// --- createSiteFunction Configuration ---
+backend.createSiteFunction.addEnvironment('ADMIN_API_KEY_SECRET_ARN', adminApiKeySecretArn);
 backend.createSiteFunction.addEnvironment('APPSYNC_API_ID', apiId);
 backend.createSiteFunction.addEnvironment('AWS_REGION_FOR_APPSYNC', region);
+backend.createSiteFunction.addEnvironment('LLM_FUNCTION_NAME', backend.llmHandlerFunction.resources.lambda.functionName);
 
-backend.createSiteFunction.addEnvironment(
-    'LLM_FUNCTION_NAME',
-    backend.llmHandlerFunction.resources.lambda.functionName
+// Add permission to read the Admin API Key Secret
+backend.createSiteFunction.resources.lambda.addToRolePolicy(
+  new iam.PolicyStatement({
+    effect: iam.Effect.ALLOW,
+    actions: ['secretsmanager:GetSecretValue'],
+    resources: [adminApiKeySecretArn],
+})
 );
 
 // Grant permissions to invoke the LLM handler function
@@ -56,9 +62,7 @@ backend.createSiteFunction.resources.lambda.addToRolePolicy(
   new iam.PolicyStatement({
     effect: iam.Effect.ALLOW,
     actions: ['appsync:GraphQL'],
-    resources: [
-        backend.data.resources.graphqlApi.arn + '/*', // Allow calling any part of the API
-    ],
+    resources: [appsyncApiArn + '/*'], // Broad access for now
 })
 );
 
@@ -79,9 +83,6 @@ backend.createSiteFunction.resources.lambda.addToRolePolicy(
 );
 
 // --- tokenGeneratorFunction Configuration ---
-const adminApiKeySecretArn = process.env.ADMIN_API_KEY_SECRET_ARN || 'arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:pagehub/adminApiKey-??????'; // Placeholder ARN - REPLACE!
-const appsyncApiArn = backend.data.resources.graphqlApi.arn;
-
 backend.tokenGeneratorFunction.addEnvironment('ADMIN_API_KEY_SECRET_ARN', adminApiKeySecretArn);
 backend.tokenGeneratorFunction.addEnvironment('APPSYNC_API_ID', apiId);
 backend.tokenGeneratorFunction.addEnvironment('AWS_REGION_FOR_APPSYNC', region);
